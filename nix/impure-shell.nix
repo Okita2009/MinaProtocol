@@ -18,6 +18,7 @@ pkgs.mkShell {
     bzip2.dev
     ncurses
     cargo
+    lmdb
   ];
   OPAMSWITCH = "mina";
   shellHook = ''
