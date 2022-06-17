@@ -108,7 +108,7 @@ let DockerfileDescription =
           , dockerContext : Optional Text
           , timeout : Optional Text
           }
-      , default = { dockerContext = None Text, timeout = None Text }
+      , default = { dockerContext = None Text, timeout = Some "10800s" }
       }
 
 let optionalBuildArg
