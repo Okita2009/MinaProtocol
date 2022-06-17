@@ -182,7 +182,7 @@ let cloudBuild
         in  Schema.Cloudbuild::{
             , steps =
               [ Schema.Step::{
-                , name = "gcr.io/kaniko-project/executor"
+                , name = "gcr.io/cloud-builders/docker"
                 , entrypoint = Some "bash"
                 , args = Some [ "-c", script ]
                 , timeout = desc.timeout
