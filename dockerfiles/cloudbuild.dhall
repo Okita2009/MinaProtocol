@@ -98,7 +98,6 @@ let ServiceDescription =
         , debRelease = None Text
         , debVersion = None Text
         , logsBucket = None Text
-        , timeout = Some "3600s"
         , extraArgs = [] : List Text
         }
       }
@@ -108,6 +107,7 @@ let DockerfileDescription =
           { service : Text
           , dockerfilePaths : List Text
           , dockerContext : Optional Text
+          , timeout : Optional Text
           }
       , default.dockerContext = None Text
       }
@@ -186,11 +186,11 @@ let cloudBuild
                 , name = "gcr.io/cloud-builders/docker"
                 , entrypoint = Some "bash"
                 , args = Some ["-c", script]
-                , timeout = serviceDesc.timeout
+                , timeout = desc.timeout
                 }
               ]
             , images = Some [ tag ]
-            , timeout = serviceDesc.timeout
+            , timeout = desc.timeout
             , logsBucket = serviceDesc.logsBucket
             }
 
@@ -219,6 +219,7 @@ let services =
         { service = "mina-daemon"
         , dockerfilePaths = [ "dockerfiles/Dockerfile-mina-daemon" ]
         , dockerContext = Some "dockerfiles/"
+        , timeout = Some "3600s"
         }
       , mina-toolchain =
         { service = "mina-toolchain"
@@ -228,6 +229,7 @@ let services =
           , "dockerfiles/stages/3-toolchain"
           ]
         , dockerContext = None Text
+        , timeout = Some "10800s"
         }
       , mina-rosetta =
         { service = "mina-rosetta"
@@ -254,6 +256,7 @@ let services =
         , dockerfilePaths =
           [ "dockerfiles/Dockerfile-delegation-backend-toolchain" ]
         , dockerContext = Some "src/app/delegation_backend"
+        , timeout = Some "10800s"
         }
       }
 
