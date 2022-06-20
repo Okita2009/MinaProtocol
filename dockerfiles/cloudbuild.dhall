@@ -130,7 +130,12 @@ let mkArgs
     = λ(tag : Text) →
       λ(desc : DockerfileDescription.Type) →
       λ(serviceDesc : ServiceDescription.Type) →
-          [ "build", "-t", tag, "--cache-from", tag ]
+          [ "build"
+          , "-t"
+          , tag
+          , "--cache-from"
+          , "gcr.io/\${PROJECT_ID}/${desc.service}"
+          ]
         # optionalBuildArg "image" (debInfo_ serviceDesc.debCodename).image
         # optionalBuildArg "MINA_REPO" serviceDesc.repo
         # optionalBuildArg "network" serviceDesc.network
@@ -154,7 +159,7 @@ let mkScript
     = λ(tag : Text) →
       λ(desc : DockerfileDescription.Type) →
       λ(serviceDesc : ServiceDescription.Type) →
-            "docker pull ${tag} || true; "
+            "docker pull gcr.io/\${PROJECT_ID}/${desc.service} || true; "
         ++  merge
               { Some = λ(ctx : Text) → ""
               , None =
