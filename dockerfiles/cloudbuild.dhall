@@ -130,7 +130,7 @@ let mkArgs
     = λ(tag : Text) →
       λ(desc : DockerfileDescription.Type) →
       λ(serviceDesc : ServiceDescription.Type) →
-          [ "build", "-t", tag ]
+          [ "build", "-t", tag, "--cache-from", tag ]
         # optionalBuildArg "image" (debInfo_ serviceDesc.debCodename).image
         # optionalBuildArg "MINA_REPO" serviceDesc.repo
         # optionalBuildArg "network" serviceDesc.network
@@ -154,7 +154,8 @@ let mkScript
     = λ(tag : Text) →
       λ(desc : DockerfileDescription.Type) →
       λ(serviceDesc : ServiceDescription.Type) →
-            merge
+            "docker pull ${tag} || true; "
+        ++  merge
               { Some = λ(ctx : Text) → ""
               , None =
                   "cat " ++ Text/concatSep " " desc.dockerfilePaths ++ " | "
