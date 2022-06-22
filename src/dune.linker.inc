@@ -5,15 +5,15 @@
 ; meaning it's a no-op) in the default case (to let the compiler choose
 ; the linker)
 
-(rule
-  (target dune-linker)
-  (enabled_if %{bin-available:lld})
-  (action (with-stdout-to dune-linker (echo "-fuse-ld=lld"))))
+;(rule
+;  (target dune-linker)
+;  (enabled_if %{bin-available:lld})
+;  (action (with-stdout-to dune-linker (echo "-ccopt=%{read:dune-linker} -fuse-ld=lld"))))
 
 (rule
   (target dune-linker)
   (enabled_if
     (or
       (= %{bin-available:lld} false)
-      (= %{env:DUNE_USE_DEFAULT_LINKER=n} y)))
+      (= %{env:DUNE_USE_DEFAULT_LINKER=n} n)))
   (action (with-stdout-to dune-linker (echo "-O2"))))

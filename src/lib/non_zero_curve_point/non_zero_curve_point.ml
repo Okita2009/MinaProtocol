@@ -43,6 +43,8 @@ module Compressed = struct
 
   [%%versioned_asserted
   module Stable = struct
+    [@@@with_topl_version_tag]
+
     module V1 = struct
       module T = struct
         type t = (Field.t, bool) Poly.Stable.V1.t
