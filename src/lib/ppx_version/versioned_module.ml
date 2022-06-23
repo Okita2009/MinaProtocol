@@ -250,7 +250,7 @@ let mk_all_version_tags_type_decl =
                validate_module_version vn loc ;
                true
              with _ -> false ->
-          (* Change [.Stable.Vn.t] to [.Stable.Vn.With_all_version_tags.t] *)
+          (* Change [.Stable.Vn.t] to [.Stable.Vn.With_all_version_tags.t_tags] *)
           let typ =
             { typ with
               ptyp_desc =
@@ -260,7 +260,7 @@ let mk_all_version_tags_type_decl =
                           ( Ldot
                               ( Ldot (Ldot (lid, "Stable"), vn)
                               , with_all_version_tags_module )
-                          , "t" )
+                          , "t_tags" )
                     ; loc
                     }
                   , typs )
@@ -271,11 +271,27 @@ let mk_all_version_tags_type_decl =
           super#core_type typ
 
     method! type_declaration type_decl =
-      { (super#type_declaration type_decl) with
-        ptype_name = { txt = "typ"; loc = type_decl.ptype_name.loc }
-      ; ptype_attributes =
-          add_bin_io type_decl.ptype_attributes ~loc:type_decl.ptype_loc
-      }
+      if String.equal type_decl.ptype_name.txt "t" then
+        let loc = type_decl.ptype_name.loc in
+        { (super#type_declaration type_decl) with
+          ptype_name = { txt = "typ"; loc }
+        ; ptype_manifest =
+            (* type typ = t = ... *)
+            ( match type_decl.ptype_manifest with
+            | Some m ->
+                Some m
+            | None ->
+                Some
+                  ( { ptyp_desc = Ptyp_constr ({ txt = Lident "t"; loc }, [])
+                    ; ptyp_loc = loc
+                    ; ptyp_loc_stack = []
+                    ; ptyp_attributes = []
+                    }
+                    : core_type ) )
+        ; ptype_attributes =
+            add_bin_io type_decl.ptype_attributes ~loc:type_decl.ptype_loc
+        }
+      else type_decl
   end
 
 let version_type ~version_option version stri ~all_version_tagged
@@ -354,107 +370,6 @@ let version_type ~version_option version stri ~all_version_tagged
     let bin_io_attr =
       lazy (create_attr ~loc (Located.mk "deriving") (PStr [ [%stri bin_io] ]))
     in
-    let _bin_io_shadows =
-      lazy
-        [ [%stri
-            let bin_read_t =
-              [%e
-                fun_args
-                  [%expr
-                    fun buf ~pos_ref ->
-                      let { version = read_version; t } =
-                        [%e apply_args [%expr bin_read_t]] buf ~pos_ref
-                      in
-                      (* sanity check *)
-                      if
-                        not
-                          (Core_kernel.Int.equal read_version [%e eint version])
-                      then
-                        failwith
-                          (Core_kernel.sprintf
-                             "bin_read_t: version read %d does not match \
-                              expected version %d"
-                             read_version [%e eint version] ) ;
-                      t]]]
-        ; [%stri
-            let __bin_read_t__ =
-              [%e
-                fun_args
-                  [%expr
-                    fun buf ~pos_ref i ->
-                      let { version = read_version; t } =
-                        [%e apply_args [%expr __bin_read_t__]] buf ~pos_ref i
-                      in
-                      (* sanity check *)
-                      if
-                        not
-                          (Core_kernel.Int.equal read_version [%e eint version])
-                      then
-                        failwith
-                          (Core_kernel.sprintf
-                             "__bin_read_t__: version read %d does not match \
-                              expected version %d"
-                             read_version version ) ;
-                      t]]]
-        ; [%stri
-            let bin_reader_t =
-              [%e
-                fun_args
-                  [%expr
-                    { Bin_prot.Type_class.read =
-                        [%e apply_args ~f:(mk_field "read") [%expr bin_read_t]]
-                    ; vtag_read =
-                        [%e
-                          apply_args ~f:(mk_field "read") [%expr __bin_read_t__]]
-                    }]]]
-          (* ; [%stri
-                 let bin_size_t =
-                   [%e
-                     fun_args
-                       [%expr
-                         fun t ->
-                           create t
-                           |> [%e apply_args [%expr With_version.bin_size_t]]]]]
-             ; [%stri
-                 let bin_write_t =
-                   [%e
-                     fun_args
-                       [%expr
-                         fun buf ~pos t ->
-                           create t
-                           |> [%e apply_args [%expr With_version.bin_write_t]] buf ~pos]]]
-             ; [%stri let bin_shape_t = bin_shape_t]
-             ; [%stri
-                 let bin_writer_t =
-                   [%e
-                     fun_args
-                       [%expr
-                         { Bin_prot.Type_class.size=
-                             [%e apply_args ~f:(mk_field "size") [%expr bin_size_t]]
-                         ; write=
-                             [%e apply_args ~f:(mk_field "write") [%expr bin_write_t]]
-                         }]]]
-          *)
-        ; [%stri
-            let bin_t =
-              [%e
-                fun_args
-                  [%expr
-                    { Bin_prot.Type_class.shape =
-                        [%e
-                          apply_args ~f:(mk_field "shape") [%expr bin_shape_t]]
-                    ; writer =
-                        [%e
-                          apply_args ~f:(mk_field "writer") [%expr bin_writer_t]]
-                    ; reader =
-                        [%e
-                          apply_args ~f:(mk_field "reader") [%expr bin_reader_t]]
-                    }]]]
-        ; [%stri
-            (* ppx_js_style rejects a single underscore *)
-            let __ = (bin_read_t, __bin_read_t__, bin_reader_t, bin_t)]
-        ]
-    in
     let all_version_tag_modules =
       if not all_version_tagged then []
       else
@@ -473,51 +388,12 @@ let version_type ~version_option version stri ~all_version_tagged
                           (List.map ~f:fst params) )
                  ] )
         in
+        let t_tags = [%stri type t_tags = typ constraint t_tags = t] in
+        (* a type that's the same as `typ`, but which is de/serialized as `t` *)
         let t = { t with ptype_attributes = [ Lazy.force bin_io_attr ] } in
-        [ pstr_module
-            (module_binding
-               ~name:(some_loc (Located.mk with_all_version_tags_module))
-               ~expr:(pmod_structure [ typ_decl; pstr_type Recursive [ t ] ]) )
-        ]
-    in
-    if not @@ List.is_empty all_version_tag_modules then (
-      Format.printf "STR@." ;
-      Pprintast.structure Format.std_formatter all_version_tag_modules ;
-      Format.printf "@." ;
-      Format.printf "END STR@." ;
-      Format.printf "ALL TAG: %B@." all_version_tagged ) ;
-    let top_version_tag_modules =
-      if not top_version_tag then []
-      else
-        let open Ast_builder in
-        let typ =
-          type_declaration ~name:(Located.mk "typ") ~params ~cstrs:[]
-            ~private_:Public
-            ~manifest:
-              (Some (ptyp_constr (Located.lident "t") (List.map ~f:fst params)))
-            ~kind:Ptype_abstract
+        let create =
+          [%stri let create t = { t; version = [%e eint version] }]
         in
-        let t_deriving =
-          create_attr ~loc (Located.mk "deriving") (PStr [ [%stri bin_io] ])
-        in
-        let typ =
-          { typ with ptype_attributes = t_deriving :: typ.ptype_attributes }
-        in
-        let t =
-          type_declaration ~name:(Located.mk "t") ~params ~cstrs:[]
-            ~private_:Public ~manifest:None
-            ~kind:
-              (Ptype_record
-                 [ label_declaration ~name:(Located.mk "version")
-                     ~mutable_:Immutable
-                     ~type_:(ptyp_constr (Located.lident "int") [])
-                 ; label_declaration ~name:(Located.mk "t") ~mutable_:Immutable
-                     ~type_:
-                       (ptyp_constr (Located.lident "typ")
-                          (List.map ~f:fst params) )
-                 ] )
-        in
-        let t = { t with ptype_attributes = [ Lazy.force bin_io_attr ] } in
         let bin_io_shadows =
           [ [%stri
               let bin_read_t =
@@ -574,34 +450,32 @@ let version_type ~version_option version stri ~all_version_tagged
                             apply_args ~f:(mk_field "read")
                               [%expr __bin_read_t__]]
                       }]]]
-            (* ; [%stri
-                   let bin_size_t =
-                     [%e
-                       fun_args
-                         [%expr
-                           fun t ->
-                             create t
-                             |> [%e apply_args [%expr With_version.bin_size_t]]]]]
-               ; [%stri
-                   let bin_write_t =
-                     [%e
-                       fun_args
-                         [%expr
-                           fun buf ~pos t ->
-                             create t
-                             |> [%e apply_args [%expr With_version.bin_write_t]] buf ~pos]]]
-               ; [%stri let bin_shape_t = bin_shape_t]
-               ; [%stri
-                   let bin_writer_t =
-                     [%e
-                       fun_args
-                         [%expr
-                           { Bin_prot.Type_class.size=
-                               [%e apply_args ~f:(mk_field "size") [%expr bin_size_t]]
-                           ; write=
-                               [%e apply_args ~f:(mk_field "write") [%expr bin_write_t]]
-                           }]]]
-            *)
+          ; [%stri
+              let bin_size_t =
+                [%e
+                  fun_args
+                    [%expr
+                      fun t -> create t |> [%e apply_args [%expr bin_size_t]]]]]
+          ; [%stri let bin_shape_t = bin_shape_t]
+          ; [%stri
+              let bin_write_t =
+                [%e
+                  fun_args
+                    [%expr
+                      fun buf ~pos t ->
+                        create t |> [%e apply_args [%expr bin_write_t]] buf ~pos]]]
+          ; [%stri
+              let bin_writer_t =
+                [%e
+                  fun_args
+                    [%expr
+                      { Bin_prot.Type_class.size =
+                          [%e
+                            apply_args ~f:(mk_field "size") [%expr bin_size_t]]
+                      ; write =
+                          [%e
+                            apply_args ~f:(mk_field "write") [%expr bin_write_t]]
+                      }]]]
           ; [%stri
               let bin_t =
                 [%e
@@ -621,7 +495,199 @@ let version_type ~version_option version stri ~all_version_tagged
                       }]]]
           ; [%stri
               (* ppx_js_style rejects a single underscore *)
-              let __ = (bin_read_t, __bin_read_t__, bin_reader_t, bin_t)]
+              let __ =
+                ( bin_read_t
+                , __bin_read_t__
+                , bin_reader_t
+                , bin_size_t
+                , bin_shape_t
+                , bin_write_t
+                , bin_writer_t
+                , bin_t )]
+          ]
+        in
+        let bin_io_tags =
+          [ [%stri let bin_read_t_tags = bin_read_t]
+          ; [%stri let __bin_read_t_tags__ = __bin_read_t__]
+          ; [%stri let bin_reader_t_tags = bin_reader_t]
+          ; [%stri let bin_size_t_tags = bin_size_t]
+          ; [%stri let bin_shape_t_tags = bin_shape_t]
+          ; [%stri let bin_write_t_tags = bin_write_t]
+          ; [%stri let bin_writer_t_tags = bin_writer_t]
+          ; [%stri let bin_t_tags = bin_t]
+          ; [%stri
+              (* ppx_js_style rejects a single underscore *)
+              let __ =
+                ( bin_read_t_tags
+                , __bin_read_t_tags__
+                , bin_reader_t_tags
+                , bin_size_t_tags
+                , bin_shape_t_tags
+                , bin_write_t_tags
+                , bin_writer_t_tags
+                , bin_t_tags )]
+          ]
+        in
+        [ pstr_module
+            (module_binding
+               ~name:(some_loc (Located.mk with_all_version_tags_module))
+               ~expr:
+                 (pmod_structure
+                    ( [ typ_decl; t_tags; pstr_type Recursive [ t ]; create ]
+                    @ bin_io_shadows @ bin_io_tags ) ) )
+        ]
+    in
+    if not @@ List.is_empty all_version_tag_modules then (
+      Format.printf "STR@." ;
+      Pprintast.structure Format.std_formatter all_version_tag_modules ;
+      Format.printf "@." ;
+      Format.printf "END STR@." ;
+      Format.printf "ALL TAG: %B@." all_version_tagged ) ;
+    let top_version_tag_modules =
+      if not top_version_tag then []
+      else
+        let open Ast_builder in
+        let typ =
+          type_declaration ~name:(Located.mk "typ") ~params ~cstrs:[]
+            ~private_:Public
+            ~manifest:
+              (Some (ptyp_constr (Located.lident "t") (List.map ~f:fst params)))
+            ~kind:Ptype_abstract
+        in
+        let t_deriving =
+          create_attr ~loc (Located.mk "deriving") (PStr [ [%stri bin_io] ])
+        in
+        let typ =
+          { typ with ptype_attributes = t_deriving :: typ.ptype_attributes }
+        in
+        let t =
+          type_declaration ~name:(Located.mk "t") ~params ~cstrs:[]
+            ~private_:Public ~manifest:None
+            ~kind:
+              (Ptype_record
+                 [ label_declaration ~name:(Located.mk "version")
+                     ~mutable_:Immutable
+                     ~type_:(ptyp_constr (Located.lident "int") [])
+                 ; label_declaration ~name:(Located.mk "t") ~mutable_:Immutable
+                     ~type_:
+                       (ptyp_constr (Located.lident "typ")
+                          (List.map ~f:fst params) )
+                 ] )
+        in
+        let t = { t with ptype_attributes = [ Lazy.force bin_io_attr ] } in
+        let create =
+          [%stri let create t = { t; version = [%e eint version] }]
+        in
+        let bin_io_shadows =
+          [ [%stri
+              let bin_read_t =
+                [%e
+                  fun_args
+                    [%expr
+                      fun buf ~pos_ref ->
+                        let { version = read_version; t } =
+                          [%e apply_args [%expr bin_read_t]] buf ~pos_ref
+                        in
+                        (* sanity check *)
+                        if
+                          not
+                            (Core_kernel.Int.equal read_version
+                               [%e eint version] )
+                        then
+                          failwith
+                            (Core_kernel.sprintf
+                               "bin_read_t: version read %d does not match \
+                                expected version %d"
+                               read_version [%e eint version] ) ;
+                        t]]]
+          ; [%stri
+              let __bin_read_t__ =
+                [%e
+                  fun_args
+                    [%expr
+                      fun buf ~pos_ref i ->
+                        let { version = read_version; t } =
+                          [%e apply_args [%expr __bin_read_t__]] buf ~pos_ref i
+                        in
+                        (* sanity check *)
+                        if
+                          not
+                            (Core_kernel.Int.equal read_version
+                               [%e eint version] )
+                        then
+                          failwith
+                            (Core_kernel.sprintf
+                               "__bin_read_t__: version read %d does not match \
+                                expected version %d"
+                               read_version version ) ;
+                        t]]]
+          ; [%stri
+              let bin_reader_t =
+                [%e
+                  fun_args
+                    [%expr
+                      { Bin_prot.Type_class.read =
+                          [%e
+                            apply_args ~f:(mk_field "read") [%expr bin_read_t]]
+                      ; vtag_read =
+                          [%e
+                            apply_args ~f:(mk_field "read")
+                              [%expr __bin_read_t__]]
+                      }]]]
+          ; [%stri
+              let bin_size_t =
+                [%e
+                  fun_args
+                    [%expr
+                      fun t -> create t |> [%e apply_args [%expr bin_size_t]]]]]
+          ; [%stri let bin_shape_t = bin_shape_t]
+          ; [%stri
+              let bin_write_t =
+                [%e
+                  fun_args
+                    [%expr
+                      fun buf ~pos t ->
+                        create t |> [%e apply_args [%expr bin_write_t]] buf ~pos]]]
+          ; [%stri
+              let bin_writer_t =
+                [%e
+                  fun_args
+                    [%expr
+                      { Bin_prot.Type_class.size =
+                          [%e
+                            apply_args ~f:(mk_field "size") [%expr bin_size_t]]
+                      ; write =
+                          [%e
+                            apply_args ~f:(mk_field "write") [%expr bin_write_t]]
+                      }]]]
+          ; [%stri
+              let bin_t =
+                [%e
+                  fun_args
+                    [%expr
+                      { Bin_prot.Type_class.shape =
+                          [%e
+                            apply_args ~f:(mk_field "shape") [%expr bin_shape_t]]
+                      ; writer =
+                          [%e
+                            apply_args ~f:(mk_field "writer")
+                              [%expr bin_writer_t]]
+                      ; reader =
+                          [%e
+                            apply_args ~f:(mk_field "reader")
+                              [%expr bin_reader_t]]
+                      }]]]
+          ; [%stri
+              (* ppx_js_style rejects a single underscore *)
+              let __ =
+                ( bin_read_t
+                , __bin_read_t__
+                , bin_reader_t
+                , bin_size_t
+                , bin_shape_t
+                , bin_write_t
+                , bin_writer_t
+                , bin_t )]
           ]
         in
         [ pstr_module
@@ -631,7 +697,7 @@ let version_type ~version_option version stri ~all_version_tagged
                  (pmod_structure
                     ( pstr_type Recursive [ typ ]
                     :: pstr_type Recursive [ t ]
-                    :: bin_io_shadows ) ) )
+                    :: create :: bin_io_shadows ) ) )
         ]
     in
 
@@ -882,12 +948,18 @@ let convert_modbody ~loc ~version_option body =
                     let saved_pos = !pos_ref in
                     let version = Bin_prot.Std.bin_read_int ~pos_ref buf in
                     let pos_ref = ref saved_pos in
-                    Array.find_map top_tag_versions ~f:(fun (i, f) ->
-                        if Int.equal i version then Ok (f buf ~pos_ref)
-                        else
-                          Error
-                            (Core_kernel.sprintf
-                               "Could not find top-tagged version %d" version ) )]
+                    match
+                      Array.find_map top_tag_versions ~f:(fun (i, f) ->
+                          if Int.equal i version then Some (f buf ~pos_ref)
+                          else None )
+                    with
+                    | Some v ->
+                        Ok v
+                    | None ->
+                        Error
+                          (Error.of_string
+                             (sprintf "Could not find top-tagged version %d"
+                                version ) )]
               in
               let top_tag_convert_guard =
                 [%stri let __ = bin_read_top_tagged_to_latest]
@@ -950,12 +1022,18 @@ let convert_modbody ~loc ~version_option body =
                     let saved_pos = !pos_ref in
                     let version = Bin_prot.Std.bin_read_int ~pos_ref buf in
                     let pos_ref = ref saved_pos in
-                    Array.find_map all_tag_versions ~f:(fun (i, f) ->
-                        if Int.equal i version then Ok (f buf ~pos_ref)
-                        else
-                          Error
-                            (Core_kernel.sprintf
-                               "Could not find all-tagged version %d" version ) )]
+                    match
+                      Array.find_map all_tag_versions ~f:(fun (i, f) ->
+                          if Int.equal i version then Some (f buf ~pos_ref)
+                          else None )
+                    with
+                    | Some v ->
+                        Ok v
+                    | None ->
+                        Error
+                          (Error.of_string
+                             (sprintf "Could not find all-tagged version %d"
+                                version ) )]
               in
               let all_tag_convert_guard =
                 [%stri let __ = bin_read_all_tagged_to_latest]
